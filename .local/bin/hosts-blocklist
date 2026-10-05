@@ -1,0 +1,370 @@
+#!/usr/bin/env bash
+# Manage the /etc/hosts blocklist.
+#
+# Subcommands:
+#   hosts-blocklist update    re-fetch the blocklist and rewrite /etc/hosts
+#   hosts-blocklist disable   park the blocklist; nothing is blocked until re-enabled
+#   hosts-blocklist enable    restore the parked blocklist
+#   hosts-blocklist status    is it on or off, and how many domains either way
+#   hosts-blocklist show      print the managed section's provenance
+#   hosts-blocklist count     how many domains are currently blocked
+#
+# disable/enable are for turning blocking off for a while without losing it. `disable`
+# moves the managed block out to /etc/hosts.blocklist-off untouched and `enable` puts
+# that same copy back, so the domain set cannot drift in between. Both need root;
+# everything else that writes /etc/hosts does too.
+#
+# The blocklist is StevenBlack's porn variant, which is the adware/tracker list plus
+# porn domains: https://github.com/StevenBlack/hosts
+#
+# Everything the script writes lives between the two marker lines in /etc/hosts, so
+# anything you put outside them is left alone.
+
+set -euo pipefail
+
+HOSTS=/etc/hosts
+BEGIN="# BEGIN hosts-blocklist -- managed blocklist, do not edit by hand"
+END="# END hosts-blocklist"
+# Where `disable` parks the managed block: a verbatim copy, markers included, so
+# `enable` is a byte-for-byte restore that needs neither the network nor the cached
+# list. Keeping the exact block rather than regenerating it also means a disable/enable
+# round trip cannot silently change the domain set if upstream has moved on.
+STASH=/etc/hosts.blocklist-off
+CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/hosts-blocklist"
+# Pinned to the invoking user's cache rather than $XDG_CACHE_HOME, because `apply`
+# runs under sudo and would otherwise look for the list in /root/.cache -- where it
+# never is -- and refuse to do anything. The list is fetched unprivileged by `update`.
+LIST="${BLOCKLIST_CACHE:-$HOME/.cache}/hosts-blocklist/blocklist.hosts"
+SOURCE_URL="https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/porn/hosts"
+
+# Added by hand, on top of the upstream list. Kept here so `update` never loses them.
+#
+# Upstream only carries four Spotify hostnames -- adeventtracker, pixel,
+# pixel-static and wl -- all of them telemetry. Nothing that actually authenticates or
+# streams is listed, so blocking Spotify properly needs its endpoint set spelled out.
+# The audio itself comes from *.scdn.co, which is a separate domain and so is not
+# caught by blocking spotify.com alone.
+#
+# The audio-*/heads-*/pl-voice-* hosts are numbered (audio2-fa .. audio16-fa,
+# audio-sv1-fa .. audio-sv9-fa) because Spotify spreads playback across several and
+# blocking only audio-fa leaves the app apparently working but silent. That was the
+# failure mode worth avoiding.
+#
+# The svN hosts are the newer audio-serving generation; keep both sets.
+EXTRA_DOMAINS=(
+    pmvhaven.com
+    www.pmvhaven.com
+
+    # Spotify: accounts and API
+    accounts.spotify.com
+    login.spotify.com
+    login5.spotify.com
+    auth.spotify.com
+    api.spotify.com
+    api-partner.spotify.com
+    spclient.wg.spotify.com
+    wg.spotify.com
+    ap.spotify.com
+    dealer.spotify.com
+
+    # Spotify: telemetry and ads
+    adeventtracker.spotify.com
+    pixel.spotify.com
+    pixel-static.spotify.com
+    spanalytics.spotify.com
+    spmetrics.spotify.com
+    ads.spotify.com
+    clienttrack.spotify.com
+
+    # Spotify: audio CDN (scdn.co) -- the actual playback
+    audio-fa.scdn.co
+    audio-ak.scdn.co
+    audio-eg.scdn.co
+    audio2-fa.scdn.co
+    audio3-fa.scdn.co
+    audio4-fa.scdn.co
+    audio5-fa.scdn.co
+    audio6-fa.scdn.co
+    audio7-fa.scdn.co
+    audio8-fa.scdn.co
+    audio9-fa.scdn.co
+    audio10-fa.scdn.co
+    audio11-fa.scdn.co
+    audio12-fa.scdn.co
+    audio13-fa.scdn.co
+    audio14-fa.scdn.co
+    audio15-fa.scdn.co
+    audio16-fa.scdn.co
+    audio-sv1-fa.scdn.co
+    audio-sv2-fa.scdn.co
+    audio-sv3-fa.scdn.co
+    audio-sv4-fa.scdn.co
+    audio-sv5-fa.scdn.co
+    audio-sv6-fa.scdn.co
+    audio-sv7-fa.scdn.co
+    audio-sv8-fa.scdn.co
+    audio-sv9-fa.scdn.co
+
+    # Spotify: artwork and metadata CDN
+    i.scdn.co
+    image2.scdn.co
+    images-fa.scdn.co
+    heads-fa.scdn.co
+    heads-sv4-fa.scdn.co
+    heads-sv5-fa.scdn.co
+    heads-sv6-fa.scdn.co
+    heads-sv7-fa.scdn.co
+    heads-sv8-fa.scdn.co
+
+    # Spotify: voice/premium preview audio
+    pl-voice-fa.scdn.co
+    pl-voice-sv4-fa.scdn.co
+    pl-voice-sv5-fa.scdn.co
+    pl-voice-sv6-fa.scdn.co
+    pl-voice-sv7-fa.scdn.co
+    pl-voice-sv8-fa.scdn.co
+)
+
+log() { printf '%s\n' "$*" >&2; }
+die() { printf 'hosts-blocklist: %s\n' "$*" >&2; exit 1; }
+
+fetch() {
+    mkdir -p "$CACHE"
+    log "fetching $SOURCE_URL"
+    if ! curl -fsS --max-time 180 -o "$LIST.new" "$SOURCE_URL"; then
+        # Keep the previous list rather than wiping /etc/hosts on a network failure.
+        [[ -s "$LIST" ]] || die "download failed and no cached list exists"
+        log "download failed, keeping the cached list"
+        rm -f "$LIST.new"
+        return 0
+    fi
+    mv "$LIST.new" "$LIST"
+    log "cached $(grep -cvE '^\s*(#|$)' "$LIST") lines"
+}
+
+# Emit the body: the upstream blocks, minus upstream's own localhost preamble (which
+# belongs in the header, not in a block section) and minus the bare "0.0.0.0 0.0.0.0"
+# placeholder line.
+build_body() {
+    [[ -s "$LIST" ]] || die "no cached list at $LIST; run 'hosts-blocklist update'"
+
+    # Strip trailing inline comments, which upstream appends to many entries as
+    # provenance notes ("00fun.com #[Tracking.Cookie]"). They are not valid in a
+    # hosts domain field, and 359 entries carry one.
+    #
+    # The whole upstream side is wrapped in braces so the pipeline does not end at the
+    # awk: without the braces the `sort -u` below became a separate command operating
+    # only on EXTRA_DOMAINS, so the two domains shared with upstream (pmvhaven.com)
+    # were emitted twice.
+    # Everything -- upstream plus the extras -- goes into one grouped block, and a
+    # single sort -u at the end dedupes it. See the note above about why this has to
+    # be one pipeline.
+    {
+        sed 's/\s*#.*$//' "$LIST" |
+            grep -vE '^\s*$' |
+            # Drop the localhost/broadcast preamble: those belong in the header above
+            # the block section, and re-adding them here would override nothing useful
+            # while risking a self-inflicted loopback.
+            grep -vE '^\s*(0\.0\.0\.0|127\.0\.0\.1|255\.255\.255\.255|::1)\s+(localhost|localhost\.localdomain|local|broadcasthost|ip6-localhost|ip6-loopback|ip6-localnet|ip6-mcastprefix|ip6-allnodes|ip6-allrouters|ip6-allhosts|0\.0\.0\.0)\s*$' |
+            grep -vE '^\s*(0\.0\.0\.0|127\.0\.0\.1)\s+0\.0\.0\.0\s*$' |
+            # Drop a bare localhost that survived on its own line.
+            grep -vE '^\s*(localhost|local|broadcasthost)\s*$' |
+            # Upstream also carries "fe80::1%lo0 localhost" -- an IPv6 link-local
+            # address with a zone index. It slips past every filter above and then
+            # normalises to a bare "localhost", which would redirect localhost.
+            grep -vE '^\s*fe80:' |
+            # Normalise: strip the address column, keep the first domain only.
+            awk '{
+                $1 = ""
+                sub(/^[ \t]+/, "")
+                # Keep just the first field, in case any entry lists several domains.
+                split($0, parts, /[ \t]+/)
+                if (parts[1] != "") print parts[1]
+            }'
+
+        for d in "${EXTRA_DOMAINS[@]}"; do
+            printf '%s\n' "$d"
+        done
+    } | sort -u
+}
+
+count_domains() {
+    [[ -f "$HOSTS" ]] || { echo 0; return; }
+    sed -n "/^${BEGIN}\$/,/^${END}\$/p" "$HOSTS" |
+        grep -cE '^\s*(0\.0\.0\.0|127\.0\.0\.1)\s+' || true
+}
+
+apply() {
+    [[ $EUID -eq 0 ]] || die "must run as root (writes $HOSTS)"
+
+    # A disabled blocklist has no markers left in $HOSTS, so apply would otherwise
+    # append a fresh block and silently switch blocking back on while leaving the
+    # parked copy behind -- two sources of truth. Refuse and make the order explicit.
+    if [[ -f "$STASH" ]]; then
+        die "blocklist is currently disabled (parked at $STASH).
+       Run 'hosts-blocklist enable' first, then 'hosts-blocklist update'.
+       Or delete $STASH if the parked copy is no longer wanted."
+    fi
+
+    local body
+    body="$(mktemp)"
+    build_body >"$body"
+    local n
+    n=$(wc -l <"$body")
+
+    local new
+    new="$(mktemp)"
+
+    # Preserve everything outside the markers; keep the standard preamble at the top.
+    if [[ -f "$HOSTS" ]] && grep -qF "$BEGIN" "$HOSTS"; then
+        # Drop the old managed block, including its markers.
+        awk -v b="$BEGIN" -v e="$END" '
+            $0 == b { skip = 1 }
+            skip    { next }
+            $0 == e { skip = 0; next }
+            { print }
+        ' "$HOSTS" >"$new"
+    else
+        cat "$HOSTS" >"$new"
+    fi
+
+    {
+        printf '\n%s\n' "$BEGIN"
+        printf '# Source: %s\n' "$SOURCE_URL"
+        printf '# Fetched: %s\n' "$(date -u '+%Y-%m-%d %H:%M UTC')"
+        printf '# Domains: %s\n' "$n"
+        printf '#\n'
+        printf '# Refresh with: sudo hosts-blocklist update\n'
+        printf '#\n'
+        printf '# NOTE: this only affects programs that resolve through libc (getaddrinfo,\n'
+        printf '# NSS). Firefox and Chrome use DNS-over-HTTPS by default, which asks the\n'
+        printf '# resolver directly and never reads /etc/hosts -- see hosts-blocklist show.\n'
+        printf '\n'
+        awk '{ printf "0.0.0.0 %s\n", $1 }' "$body"
+        printf '%s\n' "$END"
+    } >>"$new"
+
+    cat "$new" >"$HOSTS"
+    rm -f "$new" "$body"
+    log "wrote $n domains to $HOSTS"
+}
+
+block_is_present() { [[ -f "$HOSTS" ]] && grep -qF "$BEGIN" "$HOSTS"; }
+
+# The note `disable` leaves behind, and `drop_note` its inverse. `enable` and `apply`
+# both call the latter so the note never survives a round trip and accumulates.
+NOTE_A="hosts-blocklist is DISABLED"
+NOTE_B="parked in $STASH"
+
+drop_note() {
+    grep -vF "$NOTE_A" "$1" | grep -vF "$NOTE_B" || true
+}
+
+status() {
+    if block_is_present; then
+        log "state:   ENABLED -- $(count_domains) domains live in $HOSTS"
+        [[ -f "$STASH" ]] && log "warning: a parked copy also exists at $STASH (stale)"
+    elif [[ -f "$STASH" ]]; then
+        log "state:   DISABLED -- nothing is being blocked"
+        log "parked:  $STASH ($(grep -cE '^\s*(0\.0\.0\.0|127\.0\.0\.1)\s+' "$STASH" || true) domains)"
+        log "re-enable with: sudo hosts-blocklist enable"
+    else
+        log "state:   not installed -- no managed block and nothing parked"
+        log "install with: sudo hosts-blocklist update"
+    fi
+}
+
+# Park the managed block and leave a note behind, so the state is discoverable from
+# /etc/hosts alone and not only by running this script.
+#
+# The block is copied out verbatim rather than regenerated, so `enable` is exact.
+disable() {
+    [[ $EUID -eq 0 ]] || die "must run as root (writes $HOSTS)"
+    block_is_present || die "no managed block in $HOSTS -- nothing to disable"
+    # Guard rather than overwrite: a stale stash means a block is parked somewhere and
+    # writing over it would destroy the only copy of those domains.
+    if [[ -e "$STASH" ]]; then
+        die "$STASH already exists. Run 'hosts-blocklist enable' to restore it, or
+       delete it by hand if it is no longer wanted."
+    fi
+
+    local new n
+    new="$(mktemp)"
+
+    # Split on the exact marker lines, matching apply()'s awk so the two agree on
+    # where the block starts and ends. The kept block includes both markers and is
+    # written straight to $STASH -- it must NOT be a mktemp that gets cleaned up.
+    awk -v b="$BEGIN" -v e="$END" -v stash="$STASH" '
+        $0 == b { grab = 1 }
+        grab    { print > stash; next }
+        $0 == e { grab = 0; next }
+        { print }
+    ' "$HOSTS" >"$new"
+
+    n="$(grep -cE '^\s*(0\.0\.0\.0|127\.0\.0\.1)\s+' "$STASH" || true)"
+    if [[ "$n" -eq 0 ]]; then
+        rm -f "$STASH"
+        die "managed block held no domains; refusing to disable"
+    fi
+
+    {
+        printf '\n# %s. See hosts-blocklist disable.\n' "$NOTE_A"
+        printf '# %s domains are parked in %s.\n' "$n" "$STASH"
+        printf '# Nothing is blocked while this is off. Re-enable: sudo hosts-blocklist enable\n'
+    } >>"$new"
+
+    # cat, not mv: writing through the existing file keeps its root ownership and mode.
+    # Verify the new file before committing, so a truncated write cannot lose the block.
+    grep -qF "$BEGIN" "$new" && die "internal error: markers lost, $HOSTS untouched"
+
+    cat "$new" >"$HOSTS"
+    rm -f "$new"
+    log "disabled: $n domains parked in $STASH"
+    log "re-enable with: sudo hosts-blocklist enable"
+}
+
+enable() {
+    [[ $EUID -eq 0 ]] || die "must run as root (writes $HOSTS)"
+    [[ -f "$STASH" ]] || die "nothing parked at $STASH -- the blocklist is not disabled"
+
+    local new
+    new="$(mktemp)"
+
+    drop_note "$HOSTS" >"$new"
+    {
+        printf '\n'
+        cat "$STASH"
+    } >>"$new"
+
+    cat "$new" >"$HOSTS"
+    rm -f "$new" "$STASH"
+    log "enabled: $(count_domains) domains restored from the parked copy"
+}
+
+show() {
+    log "source:  $SOURCE_URL"
+    log "managed: $BEGIN .. $END"
+    log "domains: $(count_domains)"
+    log ""
+    log "IMPORTANT: DNS-over-HTTPS bypasses /etc/hosts."
+    log "Firefox and Chrome resolve through DoH by default, so this list does NOT"
+    log "block anything in them unless DoH is turned off. To make it effective:"
+    log ""
+    log "  firefox:  network.trr.mode = 5 in about:config disables DoH entirely, or"
+    log "            mode 1 keeps it only as a fallback when DNS fails."
+    log "  chromium: --disable-features=UseDnsHttps or a managed policy."
+    log ""
+    log "Everything else (kitty, nemo, mpv, most CLI tools) resolves via libc and IS"
+    log "covered by this list."
+}
+
+case "${1:-status}" in
+    update)  fetch; apply ;;
+    apply)   apply ;;
+    disable) disable ;;
+    enable)  enable ;;
+    status)  status ;;
+    show)    show ;;
+    count)   count_domains ;;
+    *)       die "usage: hosts-blocklist {update|apply|disable|enable|status|show|count}" ;;
+esac

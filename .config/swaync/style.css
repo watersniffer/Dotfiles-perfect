@@ -1,0 +1,226 @@
+/* swaync -- gruvbox dark. Self-contained: no @import, so nothing here can
+   silently break the way the previous palette import did. */
+
+@define-color nb-bg0    #282828;
+@define-color nb-bg1    #1d2021;
+@define-color nb-bg2    #3c3836;
+@define-color nb-bg3    #504945;
+@define-color nb-bg4    #665c54;
+@define-color nb-fg1    #ebdbb2;
+@define-color nb-fg2    #d5c4a1;
+@define-color nb-fg4    #a89984;
+@define-color nb-gray   #928374;
+@define-color nb-yellow #fabd2f;
+@define-color nb-orange #fe8019;
+@define-color nb-red    #fb4934;
+@define-color nb-green  #b8bb26;
+@define-color nb-aqua   #8ec07c;
+@define-color nb-blue   #83a598;
+@define-color nb-purple #d3869b;
+
+* {
+    outline: none;
+    font-family: "JetBrains Mono Nerd Font";
+    font-size: 14px;
+    text-shadow: none;
+    color: @nb-fg1;
+}
+
+window { background-color: @nb-bg0; }
+
+.control-center {
+    background-color: @nb-bg0;
+    border: 1px solid @nb-bg3;
+    border-radius: 12px;
+    padding: 5px;
+}
+
+/* Opaque cards. The old file used alpha(@background, 0.5) for normal
+   notifications, which is what let the wallpaper through. */
+.notification,
+.notification-row .notification-background {
+    background-color: @nb-bg2;
+    border: 1px solid @nb-bg3;
+    border-radius: 10px;
+    margin-top: 5px;
+}
+
+/* Critical is marked, not recoloured: same gruvbox card, red edge and red
+   summary, instead of a 50%-alpha red slab. */
+.notification.critical,
+.notification.critical .notification-background {
+    background-color: @nb-bg2;
+    border: 1px solid @nb-red;
+}
+.notification.critical .summary { color: @nb-red; }
+
+.notification > *:last-child > * { margin: 5px; }
+.notification-content { padding: 12px 10px 10px 16px; }
+
+.summary { font-size: 1.05rem; color: @nb-fg1; }
+.body    { font-size: 0.95rem; color: @nb-fg2; }
+.time    { font-size: 0.8rem;  color: @nb-gray; }
+
+.close-button {
+    background-color: @nb-bg3;
+    color: @nb-fg1;
+    border-radius: 8px;
+    padding: 2px 8px;
+}
+.close-button:hover { background-color: @nb-red; }
+
+.notification-action > button {
+    background-color: @nb-bg3;
+    color: @nb-fg1;
+    border: 1px solid @nb-bg3;
+    border-radius: 8px;
+    padding: 4px 12px;
+    margin: 0 4px 0 0;
+}
+.notification-action > button:hover {
+    background-color: @nb-blue;
+    color: @nb-bg0;
+}
+.notification-action > label {
+    font-size: 0.95rem;
+    font-weight: normal;
+    color: @nb-fg4;
+}
+
+.notification-group-header,
+.notification-group-icon {
+    font-size: 0.9rem;
+    color: @nb-gray;
+}
+
+.notification-group-collapse-button,
+.notification-group-close-all-button {
+    background-color: @nb-bg3;
+    color: @nb-fg1;
+    border-radius: 8px;
+}
+.notification-group-collapse-button:hover { background-color: @nb-blue; }
+.notification-group-close-all-button:hover { background-color: @nb-red; }
+
+trough highlight { background: @nb-blue; }
+scale trough {
+    margin: 0rem 1rem;
+    background-color: @nb-bg3;
+    min-height: 8px;
+    min-width: 70px;
+}
+slider { background-color: @nb-fg4; }
+tooltip { background-color: @nb-bg3; color: @nb-fg1; }
+
+/*** Widgets ***/
+.widget-buttons-grid { font-size: 1rem; padding: 20px 20px 10px; margin: unset; }
+.widget-buttons-grid > flowbox > flowboxchild > button {
+    background: @nb-bg3;
+    color: @nb-fg1;
+    border: 1px solid @nb-bg4;
+    border-radius: 12px;
+    min-width: 60px;
+    min-height: 30px;
+    padding: 6px;
+    margin: 0 3px 0;
+    transition: all .3s ease;
+}
+.widget-buttons-grid > flowbox > flowboxchild > button:hover { background: @nb-bg4; }
+.widget-buttons-grid > flowbox > flowboxchild > button.toggle:checked { background: @nb-blue; color: @nb-bg0; }
+.widget-buttons-grid > flowbox > flowboxchild > button.toggle:checked:hover { background: @nb-aqua; }
+
+.widget-mpris .widget-mpris-player {
+    padding: 16px;
+    margin: 16px 20px;
+    background-color: @nb-bg2;
+    border: 1px solid @nb-bg3;
+    border-radius: 12px;
+}
+.widget-mpris .widget-mpris-player .widget-mpris-album-art { border-radius: 12px; }
+.widget-mpris .widget-mpris-player .widget-mpris-title {
+    font-weight: bold;
+    font-size: 1.1rem;
+    margin: 0px 8px 6px 8px;
+    color: @nb-fg1;
+}
+.widget-mpris .widget-mpris-player .widget-mpris-subtitle { font-size: 0.95rem; color: @nb-fg2; }
+.widget-mpris .widget-mpris-player > box > button:hover { background-color: @nb-bg4; }
+.widget-mpris > box > button:hover { background: @nb-bg4; }
+
+.widget-volume { padding: 6px 5px 5px 5px; margin: unset; font-size: 1.2rem; }
+.widget-volume > box > button { border: none; }
+.per-app-volume { padding: 4px 8px 8px 8px; margin: 0px 8px 8px 8px; }
+
+.widget-backlight { padding: 0 0 3px 16px; margin: unset; font-size: 1.1rem; }
+
+.widget-dnd { font-weight: bold; margin: unset; padding: 20px 15px 15px 15px; color: @nb-fg1; }
+.widget-dnd > switch {
+    font-size: initial;
+    border-radius: 100px;
+    background: @nb-yellow;
+    border: none;
+    box-shadow: none;
+    padding: 3px;
+}
+.widget-dnd > switch:checked { background: @nb-green; }
+.widget-dnd > switch slider {
+    background: @nb-bg0;
+    border-radius: 12px;
+    min-width: 18px;
+    min-height: 18px;
+}
+
+.widget-title { margin: unset; font-weight: bold; padding: 15px; }
+.widget-title > label { font-size: 1.3rem; color: @nb-fg1; }
+.widget-title > button {
+    text-shadow: none;
+    background: @nb-red;
+    color: @nb-bg0;
+    border: none;
+    box-shadow: none;
+    border-radius: 100px;
+    padding: 0px 8px;
+    transition: all .3s ease;
+}
+.widget-title > button:hover { background: @nb-orange; }
+
+/* theme-switcher:swaync:begin -- generated by theme-switcher, edits inside are overwritten */
+/* swaync 0.12.6's own palette names. */
+@define-color cc-bg transparent;
+@define-color noti-bg rgba(30,30,46,0.85);
+@define-color noti-bg-opaque #1e1e2e;
+@define-color noti-bg-darker #181825;
+@define-color noti-bg-hover #45475a;
+@define-color noti-bg-hover-opaque #45475a;
+@define-color noti-bg-focus #313244;
+@define-color noti-close-bg rgba(205,214,244,0.1);
+@define-color noti-close-bg-hover rgba(205,214,244,0.15);
+@define-color text-color #cdd6f4;
+@define-color text-color-disabled #a6adc8;
+@define-color noti-border-color rgba(205,214,244,0.18);
+@define-color bg-selected #89b4fa;
+
+/* The nb-* names the hand-written part of this stylesheet uses. Re-declared here
+ * so they follow the theme; the originals near the top of the file stay as a
+ * fallback. */
+@define-color nb-bg0 #1e1e2e;
+@define-color nb-bg1 #181825;
+@define-color nb-bg2 #313244;
+@define-color nb-bg3 #45475a;
+@define-color nb-bg4 #585b70;
+@define-color nb-fg1 #cdd6f4;
+@define-color nb-fg2 #bac2de;
+@define-color nb-fg4 #a6adc8;
+@define-color nb-gray #6c7086;
+@define-color nb-yellow #f9e2af;
+@define-color nb-orange #fab387;
+@define-color nb-red #f38ba8;
+@define-color nb-green #a6e3a1;
+@define-color nb-aqua #94e2d5;
+@define-color nb-blue #89b4fa;
+@define-color nb-purple #cba6f7;
+
+.widget-mpris > box > button:hover {
+  background: rgba(69,71,90,1);
+}
+/* theme-switcher:swaync:end -- generated by theme-switcher, safe to delete this whole block */

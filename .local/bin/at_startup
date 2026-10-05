@@ -1,0 +1,23 @@
+#!/bin/bash
+
+STARTUP_SCRIPTS="$HOME/.local/bin/startup"
+
+# Single instance: re-running (config reloads, manual calls) must not stack
+# duplicate long-lived processes like the auto_caffeine gdbus monitor.
+exec 9>"${TMPDIR:-/tmp}/at_startup.lock"
+flock -n 9 || exit 0
+
+for SCRIPT in $STARTUP_SCRIPTS/*; do
+    [[ -e "$SCRIPT" ]] || exit 0
+    SCRIPT_NAME="${SCRIPT##*/}"
+
+    # Only executable *.sh files: skips README.md, dotfiles and *.bak*
+    if [[ $SCRIPT_NAME == _* ]] || [[ "$SCRIPT_NAME" != *.sh ]]; then
+        continue
+    fi
+
+    if [[ -f "$SCRIPT" ]] && [[ -x "$SCRIPT" ]]; then
+        # 9>&- releases the lock in the child so the parent can exit
+        "$SCRIPT" > /dev/null 2>&1 9>&- &
+    fi
+done

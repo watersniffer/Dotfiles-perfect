@@ -1,0 +1,10 @@
+# Readline, used by bash.
+#
+# Default is `set bell-style audible`, which means readline emits a terminal
+# bell on things like pressing Up/Down at the edge of the history, then kitty
+# rings it. Neither is wanted: no sound, no visual flash.
+set bell-style none
+set prefer-visible-bell off
+set completion-query-items 200
+set show-all-if-ambiguous on
+set colored-stats on

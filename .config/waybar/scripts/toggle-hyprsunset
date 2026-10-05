@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+
+# Blue light filter toggle, wired to the waybar battery icon's on-click.
+#
+# hyprsunset rather than hyprshade (config/waybar/config-hypr.jsonc, and the
+# arnav4o4/Nigtht-Light-Hyprland README): hyprshade's screen shader flickers on
+# this machine. hyprsunset instead drives Hyprland's hyprland-ctm-control-v1
+# colour transform, which the compositor applies once, as a matrix on the GPU
+# output, so there is nothing to redraw frame by frame and nothing to flicker.
+# hyprshade is still installed and still works (`hyprshade toggle blue-light-
+# filter`), it just is not what the bar calls.
+#
+# hyprsunset applies its CTM for as long as the process runs and puts the
+# identity matrix back on SIGTERM, so there is no separate on/off state to keep:
+# the process IS the state. pgrep decides which way to go, pkill -- or starting
+# it -- flips it. One caveat that follows from this: something that kills
+# hyprsunset for an unrelated reason (a crash, a stray pkill) turns the filter
+# off, and the bar icon cannot show that, since it is a battery module.
+#
+# Temperature, in kelvin: edit this line. It is passed as -t rather than left to
+# a config file because this hyprsunset (0.4.0) reads profiles only through its
+# own --config flag -- a ~/.config/hypr/hyprsunset.conf is silently ignored ("0
+# profiles"), and the no-flag default is 6000K, which is warm enough to look
+# broken rather than filtered. 4000K is f.lux's "oldie" setting: warm at night,
+# still comfortable for reading.
+
+temperature=4000
+
+if pgrep -x hyprsunset >/dev/null; then
+    pkill -x hyprsunset
+else
+    # nohup + &: waybar spawns this through a bare `sh -c` that exits the moment
+    # hyprsunset is in the background, so hyprsunset has to be reparented or it
+    # dies with that shell. Same shape as scripts/toggle-gammastep.
+    nohup hyprsunset -t "$temperature" >/dev/null 2>&1 &
+fi

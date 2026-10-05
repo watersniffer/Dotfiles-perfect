@@ -1,0 +1,75 @@
+#!/bin/sh
+# power-mode -- cycle the power-profiles-daemon profile. Bound to Super+P.
+#
+# Cycles performance -> balanced -> power-saver -> performance, and says which one
+# it landed on, because a power mode you cannot see is a power mode you will not
+# trust to be in the state you left it in.
+#
+# Why not just bind `powerprofilesctl set next`
+# ---------------------------------------------
+# powerprofilesctl has no `next`. It takes an explicit profile name, and the order
+# it considers "next" is the daemon's business rather than something this config
+# gets to choose. The order here is deliberate: performance first, because that is
+# the mode worth being able to reach in one keypress from a game, and power-saver
+# last, so the walk from balanced to power-saver is one press and from power-saver
+# back to performance is also one press.
+#
+# This is powerprofilesctl rather than the powerprofile script that also lives in
+# this directory. That one is written for asusctl, and this machine is a Dell --
+# asusctl is not installed and would not drive it even if it were. power-profiles-
+# daemon is what is actually running here, over intel_pstate.
+#
+# One thing worth knowing when reading /sys: with intel_pstate active the
+# scaling_governor stays "powersave" whatever profile is selected. The profile
+# moves energy_performance_preference instead. So the governor is not evidence that
+# nothing happened, and it is not evidence that something did.
+
+set -u
+
+ORDER="performance balanced power-saver"
+
+say() {
+    # mako owns the notification bus; notify-send goes through the same portal.
+    notify-send -a "power-mode" -u low "Power mode" "$1" 2>/dev/null || true
+}
+
+# Human label for a profile name. A case statement rather than a lookup variable,
+# because "power-saver" is not a usable shell variable name -- `LABEL_power-saver=x`
+# parses as a command call, which passes `sh -n` and then fails at runtime.
+label_for() {
+    case $1 in
+        power)       printf 'Performance' ;;
+        balanced)    printf 'Balanced' ;;
+        power-saver) printf 'Power saver' ;;
+        *)           printf '%s' "$1" ;;
+    esac
+}
+
+current=$(powerprofilesctl get 2>/dev/null) || {
+    say "power-profiles-daemon is not answering"
+    exit 1
+}
+
+# Walk ORDER and step to whatever follows the current profile. Falls through to the
+# first entry when the current profile is not one we know about, so an unexpected
+# value from the daemon still produces a valid next profile rather than nothing.
+next=""
+seen_current=0
+for p in $ORDER; do
+    if [ "$seen_current" -eq 1 ]; then
+        next=$p
+        break
+    fi
+    [ "$p" = "$current" ] && seen_current=1
+done
+[ -n "$next" ] || next=$(printf '%s' "$ORDER" | cut -d' ' -f1)
+
+if ! powerprofilesctl set "$next" >/dev/null 2>&1; then
+    say "could not switch to $next"
+    exit 1
+fi
+
+# Confirm rather than assume: report what the daemon says it actually applied, not
+# what was requested. They can disagree, and a wrong label is worse than none.
+applied=$(powerprofilesctl get 2>/dev/null || printf '%s' "$next")
+say "$(label_for "$applied")"

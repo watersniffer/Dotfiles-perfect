@@ -1,0 +1,157 @@
+@import url("colors.css");
+
+* {
+    font-family: "JetBrainsMono Nerd Font", sans-serif;
+    font-weight: 800;
+    font-size: 10px;
+    color: @fg;
+}
+
+/* The bar window itself: transparent, square, no margin.
+ *
+ * The inset and the background live on window#waybar > box below. A Wayland layer-shell
+ * surface always spans the full output width, so margin set on THIS window is silently
+ * ignored -- with a magenta background and margin 8px, x=2, x=9, x=1362 and y=1 all
+ * still painted magenta. The direct child box is an ordinary widget and does honour it. */
+window#waybar {
+    background: transparent;
+    border-radius: 0;
+    border: 0px;
+    margin: 0px;
+    padding: 0px;
+    min-height: 0px;
+}
+
+
+/* The island background and inset live here, not on window#waybar (see above).
+ *
+ * @island is rgba(40,40,40,0.85), so the bar stays translucent over the wallpaper. If
+ * this ever goes missing the bar renders GTK's default opaque grey instead. */
+window#waybar > box {
+    background: @island;
+    /* 5px from the left and right screen edges, 3px off the top, 0 below.
+     *
+     * The bottom is zero on purpose. The surface reserves its whole height as an
+     * exclusive zone, so its bottom edge is exactly where windows are told to start;
+     * any bottom margin would be transparent padding between the bar and the windows,
+     * which reads as the bar floating too high. The gap below the bar is Hyprland's own
+     * window gap, a compositor setting and not this file's business.
+     *
+     * The horizontal value must be spelled out in px -- GTK's CSS will not take a
+     * percentage, `margin: 3px 1%` is a parse error and waybar refuses to start. */
+    margin: 3px 5px 0px;
+    /* 0, not 8. The 5px margin already sets the gap to the screen edge, so 8px of
+     * padding on top of it left ~13px of dead space at each end with the first module
+     * floating in the middle of it. The module-level margin is what spaces the
+     * modules off each other. */
+    padding: 0px 0px;
+    /* Square corners. The bar is inset from the screen edges but the corners are left
+     * unrounded, so the gap reads as a margin rather than as a floating island. */
+    border-radius: 0;
+    border: 1px solid @bg3;
+}
+
+/* Module groups are layout only.
+ *
+ * These must stay transparent: the background is on the container box above, and a
+ * group painting its own pill would repaint over it and split the island into pieces.
+ * Horizontal padding only, to keep the modules off each other -- vertical padding here
+ * is what forces the bar taller. */
+.modules-left,
+.modules-center,
+.modules-right,
+#custom-media {
+    background: transparent;
+    border-radius: 0;
+    padding: 0px 8px;
+    margin: 0px;
+}
+
+/* WORKSPACES
+ *
+ * Diamonds, not numbers. The module is hyprland/workspaces, so its id is "workspaces"
+ * and these selectors name the module rather than a class -- GTK's CSS cannot say "any
+ * of these ids".
+ *
+ * COLOUR AND SIZE GO ON `label`, NOT ON `button`
+ * ----------------------------------------------
+ * This is the whole trick and it was measured, not guessed. On this GTK/waybar, `color`
+ * and `font-size` set on `#workspaces button` are silently ignored: a probe with the
+ * button set to #ff0000 at 20px and .active to #0000ff at 40px left all marks at their
+ * normal colour and size. `background` and `border-bottom` on that same selector DID
+ * apply, so the selector matches -- it is specifically the two text properties that get
+ * dropped, because a GtkButton does not draw its own text. The text lives on a child
+ * GtkLabel, and the same properties written as `#workspaces button label` take effect.
+ *
+ * Filled vs hollow is set in config-hypr.jsonc, not here: GTK3's CSS cannot fill a
+ * glyph, so occupancy has to be a different character (U+25C6 filled / U+25C7 hollow).
+ * Shape carries occupancy; size and brightness carry which one is active.
+ *
+ * The size difference is load-bearing -- it marks the active workspace by shape as well
+ * as brightness, so it survives a greyscale palette.
+ *
+ * ON THE ANIMATION
+ * Waybar is not a compositor and does not tween between workspace states, so the only
+ * motion available is GTK's `transition` on properties that change on a widget that
+ * stays alive. That is exactly the workspace case: switching moves the `active` class
+ * from one button to another, so two labels change colour and size on widgets that
+ * persist. It goes on the label for the reason above -- on the button it would only
+ * ever animate `background`, which is the hover state. `font-size` may snap anyway,
+ * since GTK3 does not always interpolate a length; colour definitely interpolates and
+ * is what carries the change.
+ *
+ * @overlay2 for the inactive mark, not @ws_inactive or @overlay0. @ws_inactive is
+ * #262626, the same value as @bg3, which is illegible at this size against an island
+ * whose measured interior luminance is about 3/255. @overlay0 (#767676) measured back
+ * at only #545454, because a hollow diamond is thin anti-aliased strokes and most pixels
+ * never reach the nominal colour. @overlay2 (#a0a0a0) lands the visible strokes near
+ * where @overlay0 nominally was while staying clearly behind the active #f2f2f2.
+ *
+ * border-bottom: none is explicit because an underline under a diamond reads as a stray
+ * rule rather than as part of the marker.
+ *
+ * Niri exposes a focused workspace separately from the active one and this stylesheet is
+ * shared with config-niri.jsonc, so both selectors are covered.
+ */
+#workspaces button {
+    padding: 0px;
+    margin: 0px 1px;
+    border-radius: 0;
+    background: transparent;
+    /* Sized for the ACTIVE glyph, which is larger, so switching does not resize the
+     * button and shove its neighbours sideways. */
+    min-width: 12px;
+    transition: background-color 160ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+#workspaces button label {
+    color: @overlay2;
+    font-size: 16px;
+    transition: color 260ms cubic-bezier(0.4, 0, 0.2, 1),
+                font-size 260ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+#workspaces button.active,
+#workspaces button.focused {
+    background: transparent;
+    border-bottom: none;
+}
+
+#workspaces button.active label,
+#workspaces button.focused label {
+    background: transparent;
+    color: @ws_active;
+    font-size: 20px;
+}
+
+#workspaces button:hover {
+    /* @bg3 rather than @hover: @hover is not defined in colors.css, in neither the
+     * original file nor the generated one, so a rule using it is a declaration GTK drops
+     * on the floor. @bg3 is the same colour by intent. */
+    background: @bg3;
+}
+
+#workspaces button.urgent {
+    background: @urgent;
+}
+

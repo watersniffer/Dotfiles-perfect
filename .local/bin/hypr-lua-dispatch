@@ -1,0 +1,133 @@
+#!/usr/bin/env python3
+"""Dispatch a Hyprland action, working around the Lua config.
+
+Why this exists
+---------------
+The dock needs to focus and close windows by address. Neither obvious route works
+on this machine:
+
+  1. quickshell's built-in `Hyprland.dispatch("focusWindow", { address })` returns
+     without throwing and does nothing. Its only baked-in Lua template is
+     `hl.dsp.focus({ workspace = "%1" })` -- workspace only, no window form -- and
+     the call is swallowed silently, so a broken dock looks like an unresponsive
+     one.
+
+  2. `hyprctl dispatch focuswindow <addr>` is parsed as a Lua expression and dies:
+     "')' expected near '0x5623d68f9d30'". This Hyprland runs a Lua config
+     (hyprland.lua), so every dispatch has to be written as an hl.dsp call with a
+     Lua table.
+
+So this helper speaks to Hyprland's raw command socket directly, bypassing the Lua
+parser entirely, and sends the two argument shapes that were verified to work:
+
+    hl.dsp.focus           { window = "class:<cls>" }   -> ok
+    hl.dsp.window.close    { address = "<hex, no 0x>" } -> ok
+
+Both spellings matter:
+
+  * `hl.focus` does NOT accept an address. Every one of these failed:
+      { window = "<hex>" }              -> window not found
+      { window = { address = "<hex>" } } -> expected a window object or selector
+      { window = "kitty" }              -> window not found
+    Only a selector string works, and `class:<cls>` is the one that resolves. This
+    is why the dock cycles by class rather than by address.
+
+  * `hl.dsp.window.close` wants the address with the `0x` stripped. With the prefix
+    it silently resolves to nothing; without it the window actually closes
+    (verified by watching the client list go from two entries to one).
+
+  * `hl.focus` CANNOT address a window. Every address-shaped selector failed
+    ("window not found" for a bare hex, for "addr:", "id:", "win:", "handle:" and
+    "0x..." forms), and the window-object form is not reachable either
+    ({ window = { address = "..." } }, with and without workspace/monitor/class,
+    all returned "expected a window object or selector"). Only a selector string
+    resolves. `class:<cls>` and the bare word `active` are the two that work;
+    `first`, `last`, `focused`, `next`, `prev`, a raw class name and `title:<t>` all
+    return "window not found".
+
+  * Cycling between several windows of the SAME app is therefore built from
+    `hl.focus { last = true }`, which toggles between the two most recently focused
+    windows. Verified with two kitty windows open: focus class:kitty then last,
+    three times running, lands on a different address every time.
+
+    The honest limit: that is a toggle between two windows, not an arbitrary cycle,
+    so with three or more windows of one app open it walks the two most recent rather
+    than all of them. There is no way to address the third one on this setup.
+
+Usage:  hypr-lua-dispatch focus <class>     focus the app with this window class
+        hypr-lua-dispatch close <address>   close the window at this address
+        hypr-lua-dispatch last             focus the previously focused window
+"""
+
+import os
+import socket
+import sys
+
+FOCUS_SELECTOR = "class:"
+
+
+def socket_path():
+    sig = os.environ.get("HYPRLAND_INSTANCE_SIGNATURE")
+    if not sig:
+        die("HYPRLAND_INSTANCE_SIGNATURE is unset; run this from inside Hyprland")
+    runtime = os.environ.get("XDG_RUNTIME_DIR", "/run/user/1000")
+    path = os.path.join(runtime, "hypr", sig, ".socket.sock")
+    if not os.path.exists(path):
+        die("no Hyprland command socket at " + path)
+    return path
+
+
+def die(msg):
+    sys.stderr.write("hypr-lua-dispatch: " + msg + "\n")
+    sys.exit(1)
+
+
+def send(command):
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        s.connect(socket_path())
+        s.sendall((command + "\n").encode())
+        s.shutdown(socket.SHUT_WR)
+        chunks = []
+        while True:
+            part = s.recv(4096)
+            if not part:
+                break
+            chunks.append(part)
+    finally:
+        s.close()
+    reply = b"".join(chunks).decode(errors="replace").strip()
+    if reply.startswith("ok"):
+        return 0
+    # Hyprland writes warnings to stderr on the socket too, so anything that is not
+    # "ok" is a failure worth surfacing. A dispatcher that silently does nothing is
+    # exactly the failure mode that made this dock look broken.
+    if reply:
+        sys.stderr.write("hypr-lua-dispatch: " + reply + "\n")
+        return 1
+    return 0
+
+
+def main():
+    if len(sys.argv) < 3:
+        die(__doc__.strip().splitlines()[0])
+    action, target = sys.argv[1], sys.argv[2]
+
+    if action == "focus":
+        # Escape any double quotes in the class so the Lua table stays well formed.
+        cls = target.replace('"', '\\"')
+        sys.exit(send('dispatch hl.dsp.focus { window = "%s%s" }' % (FOCUS_SELECTOR, cls)))
+
+    if action == "close":
+        addr = target[2:] if target.startswith("0x") else target
+        sys.exit(send('dispatch hl.dsp.window.close { address = "%s" }' % addr))
+
+    if action == "last":
+        # No target needed, but argv[2] has to exist for the guard above.
+        sys.exit(send("dispatch hl.dsp.focus { last = true }"))
+
+    die("unknown action %r (expected focus, close or last)" % action)
+
+
+if __name__ == "__main__":
+    main()

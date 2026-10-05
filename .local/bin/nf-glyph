@@ -1,0 +1,170 @@
+#!/usr/bin/env python3
+"""Resolve Nerd Font codepoints to their real glyph names, and vice versa.
+
+Usage:
+    nf-glyph F120 F269          # names for these hex codepoints
+    nf-glyph U+F120             # the U+ prefix is fine too
+    nf-glyph --name firefox     # codepoint(s) whose glyph name matches
+    nf-glyph --list cube        # every glyph name containing this substring
+
+Exits non-zero if any requested codepoint is absent from the font.
+
+Why this exists
+---------------
+Picking a Nerd Font codepoint from memory is unreliable. U+F268 looks like it
+ought to be a browser but is fa-chrome; U+F2B5 is fa-handshake_o; U+F1E5 is
+fa-binoculars; U+F4A5 is oct-file. fc-list is not a reliable check either:
+
+    fc-list :charset=F120 family          # works
+    fc-list :family="JetBrainsMono Nerd Font":charset=F120   # matches NOTHING
+
+The second form silently returns zero rows whether or not the font has the
+glyph, so it is a good way to convince yourself a glyph is missing when it is
+present. This reads the font's own 'post' and 'cmap' tables instead, which is
+the same answer Pango arrives at.
+"""
+
+import glob
+import os
+import struct
+import sys
+
+FONT_DIRS = [
+    os.path.expanduser("~/.local/share/fonts/JetBrainsMonoNerdFont"),
+    "/usr/share/fonts/nerd-fonts",
+    "/usr/share/fonts",
+]
+
+# Nerd Font glyphs live in the private use areas. Everything below this is
+# ordinary Unicode and not worth walking.
+PUA_LO = 0xE000
+PUA_HI = 0xF8FF
+
+
+def find_font():
+    for d in FONT_DIRS:
+        hits = sorted(glob.glob(os.path.join(d, "*Regular.ttf")) or
+                      glob.glob(os.path.join(d, "*Regular.otf")))
+        if hits:
+            return hits[0]
+    hits = sorted(glob.glob(os.path.expanduser(
+        "~/.local/share/fonts/**/*NerdFont*Regular.ttf"), recursive=True))
+    if hits:
+        return hits[0]
+    raise SystemExit("nf-glyph: no Nerd Font found in " + ", ".join(FONT_DIRS))
+
+
+def read_tables(data):
+    n = struct.unpack(">H", data[4:6])[0]
+    t = {}
+    for i in range(n):
+        off = 12 + i * 16
+        tag = data[off:off + 4].decode("latin1")
+        o, ln = struct.unpack(">II", data[off + 8:off + 16])
+        t[tag] = (o, ln)
+    return t
+
+
+def glyph_names(data, post):
+    """gid -> glyph name, from a version 2.0 'post' table."""
+    o, ln = post
+    if struct.unpack(">I", data[o:o + 4])[0] != 0x20000:
+        return {}
+    num = struct.unpack(">H", data[o + 32:o + 34])[0]
+    idx = [struct.unpack(">H", data[o + 34 + 2 * i:o + 36 + 2 * i])[0]
+           for i in range(num)]
+    p = o + 34 + 2 * num
+    names = []
+    while p < o + ln:
+        ln2 = data[p]
+        names.append(data[p + 1:p + 1 + ln2].decode("latin1"))
+        p += 1 + ln2
+    return {gid: (names[j - 258] if j >= 258 else "mac%d" % j)
+            for gid, j in enumerate(idx)}
+
+
+def build_pua_map(data, cmap, gname):
+    """{codepoint: glyph name} for the private use area.
+
+    Walks format 12 cmap groups, expanding only the part of each group that
+    lands in the PUA, so this stays fast even though the font also has a
+    format 4 subtable and often several subtables per platform.
+    """
+    out = {}
+    o, _ = cmap
+    n = struct.unpack(">H", data[o + 2:o + 4])[0]
+    for i in range(n):
+        _pid, _eid, off = struct.unpack(">HHI", data[o + 4 + i * 8:o + 12 + i * 8])
+        if struct.unpack(">H", data[o + off:o + off + 2])[0] != 12:
+            continue
+        c = o + off
+        ng = struct.unpack(">I", data[c + 12:c + 16])[0]
+        for k in range(ng):
+            s, e, g = struct.unpack(">III", data[c + 16 + k * 12:c + 28 + k * 12])
+            if e < PUA_LO or s > PUA_HI:
+                continue
+            for u in range(max(s, PUA_LO), min(e, PUA_HI) + 1):
+                nm = gname.get(g + (u - s))
+                if nm:
+                    out.setdefault(u, nm)
+    return out
+
+
+def parse_cp(arg):
+    a = arg.strip()
+    if a[:1] in ("U", "u"):
+        a = a[1:]
+    if a[:1] in ("+",):
+        a = a[1:]
+    try:
+        return int(a, 16)
+    except ValueError:
+        raise SystemExit("nf-glyph: not a hex codepoint: %r" % arg)
+
+
+def main():
+    argv = sys.argv[1:]
+    mode = "cp"
+    if argv and argv[0] in ("--name", "--list"):
+        mode = argv.pop(0)
+    if not argv:
+        raise SystemExit("usage: nf-glyph [--name SUBSTR] CODEPOINT...")
+
+    path = find_font()
+    data = open(path, "rb").read()
+    tables = read_tables(data)
+    if "post" not in tables or "cmap" not in tables:
+        raise SystemExit("nf-glyph: %s lacks post/cmap tables" % path)
+    gname = glyph_names(data, tables["post"])
+    pua = build_pua_map(data, tables["cmap"], gname)
+
+    if mode == "cp":
+        rc = 0
+        for arg in argv:
+            cp = parse_cp(arg)
+            nm = pua.get(cp)
+            if nm:
+                print("U+%04X  %s" % (cp, nm))
+            elif not (PUA_LO <= cp <= PUA_HI):
+                print("U+%04X  -- outside the private use area (U+E000..U+F8FF); "
+                      "only Nerd Font glyphs are looked up there" % cp)
+                rc = 1
+            else:
+                print("U+%04X  -- not in this font" % cp)
+                rc = 1
+        return rc
+
+    needle = argv[0]
+    hits = sorted((u, nm) for u, nm in pua.items() if needle in nm)
+    if not hits:
+        print("no glyph name containing %r" % needle)
+        return 1
+    for u, nm in hits[:40]:
+        print("U+%04X  %s" % (u, nm))
+    if len(hits) > 40:
+        print("... and %d more" % (len(hits) - 40))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

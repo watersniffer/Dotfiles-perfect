@@ -1,0 +1,159 @@
+// Waybar config for the Hyprland session.
+//
+// Generated from config-niri.jsonc, the bar this machine already uses. Waybar's
+// workspace module is the only compositor-specific part, so the whole file is
+// that config with two changes and nothing else:
+//
+//   1. niri/workspaces  ->  hyprland/workspaces
+//   2. its format token {value} -> {id}, which is what hyprland/workspaces
+//      interpolates
+//
+// The remaining custom module (media) and everything else are untouched: none of
+// them talk to compositor IPC, and style.css never names a module, so the same
+// stylesheet styles both bars.
+//
+// custom/cpucat, the animated cat, was removed from modules-left and its
+// #custom-cpucat rule deleted from style.css. The script and its Waycat font are
+// still in the repo -- config/waybar/scripts/catloop.sh and
+// config/waybar/scripts/fonts/Waycat.ttf -- so putting it back is a one-line
+// change to modules-left plus the exec block, if it is ever wanted.
+{
+  // Off deliberately. It reloads the bar's style whenever style.css changes,
+  // and under niri that style reload drops the bar onto the Bottom layer,
+  // where every window covers it. Editing the palette is not lost either way:
+  // themesw sends SIGUSR2, which re-reads the stylesheet and keeps the layer.
+  "reload_style_on_change": false,
+  "layer": "top",
+  "position": "top",
+  "spacing": 5,
+  // Attached to the top edge: no floating margins, and a real 34px height
+  // (it used to be 1 here, with the visible height coming from the CSS
+  // min-height instead).
+  "height": 33,  // 33 is the SURFACE: 3px above + the 30px island + 0px below.
+               // The bottom is 0 because the surface's bottom edge is where
+               // windows are told to start -- its full height is the exclusive
+               // zone -- so bottom margin is transparent gap between the bar
+               // and the first window. Do not put any back without moving this
+               // number to match, or the bar is clipped.
+
+  // the app running on each workspace in place of its number, and
+  // hyprland/workspaces can only format {id}, which is a number. The icon arrives
+  // as a background-image because a custom waybar module cannot put an image in
+  // its label -- see scripts/workspace-icons for how the owning app is chosen,
+  // and scripts/ws-icons-map.py for the stylesheet that draws it.
+  "modules-left": ["hyprland/workspaces"],
+  // custom/media rather than mpris: the mpris module always renders a label,
+  // so its island pill showed up as an empty capsule whenever nothing was
+  // playing. hide-empty-text removes the module instead, so the pill only
+  // exists while there is something to show.
+  "modules-center": ["custom/media"],
+  "modules-right": [
+    "tray",
+    "wireplumber",
+    "backlight",
+    "battery",
+    "clock",
+    "custom/swaync"
+  ],
+  // Workspace switcher: diamonds, filled when the workspace has windows on it. The
+  // active one is marked by size and colour in style.css, with a transition on both,
+  // and that transition is what animates the switch.
+  //
+  // format-icons values are TEXT drawn by Pango -- there is no icon-theme lookup in
+  // this path, so a value like "firefox" prints that word instead of showing a glyph.
+  // Shape is therefore the only way to encode occupancy: GTK3 CSS cannot fill a glyph.
+  //
+  // Two dead ends, recorded so they are not tried again. workspace-taskbar (see
+  // man5/waybar-hyprland-workspaces) is compiled into the packaged 0.15.0-3 but inert:
+  // it never emits even its own "is not defined or is not an object" warning, so the
+  // key is never read. wlr/taskbar needs zwlr_foreign_toplevel_manager_v1, a wlroots
+  // protocol Hyprland does not implement, so it has no toplevel list and renders
+  // nothing. {windows} + window-rewrite does draw a glyph per window but renders the
+  // workspace number alongside them; if revisited, note that ^ and $ in a "class<...>"
+  // key silently never match and the LAST matching rule wins.
+  "hyprland/workspaces": {
+      // Filled U+25C6 when the workspace has windows, hollow U+25C7 when it does not.
+      // `default` (an ordinary workspace with windows) and `persistent` (pinned by a
+      // workspace rule) mean occupied; `empty` is the only hollow one. `active` is
+      // filled too -- an active workspace is nearly always occupied, and hollowing it
+      // would fight the size and colour that mark it, leaving the current workspace
+      // looking emptier than a background one.
+    "format": "{icon}",
+    "format-icons": {
+      "active": "\u25c6",
+      "persistent": "\u25c6",
+      "default": "\u25c6",
+      "empty": "\u25c7"
+    },
+    "disable-scroll": false,
+    "all-outputs": true
+  },
+  // Notification centre. Click toggles swaync's panel.
+  // The exec is deliberate: a custom module WITHOUT one busy-loops in waybar
+  // (measured at ~18% CPU on this machine), whereas polling the count every 5s
+  // costs ~0.5%. -sw keeps it from hanging when the daemon is down.
+  "custom/swaync": {
+    "format": "\uf0f3",                                    // nf-fa-bell
+    "tooltip": false,
+    "exec": "swaync-client -sw --count 2>/dev/null || echo 0",
+    "on-click": "swaync-client --toggle-panel",
+    "interval": 5
+  },
+
+  "custom/media": {
+    "exec": "bash ~/.config/waybar/scripts/media-title.sh",
+    "interval": 2,
+    "hide-empty-text": true,
+    "max-length": 40,
+    // Escape the title as Pango markup entities. Without this a track with an
+    // ampersand in it -- "JEE Wallah - BINOMIAL THEOREM ... Concepts & PYQs" --
+    // makes waybar log "Entity did not end with a semicolon" every two seconds and
+    // draw nothing, because the raw & reaches Pango as the start of an entity. Any
+    // title containing &, < or > breaks it, so this is not a one-song problem.
+    "escape": true
+  },
+
+  "tray": {
+    "icon-size": 14,
+    "spacing": 4
+  },
+  "wireplumber": {
+    "scroll-step": 5,
+    "format": " {icon} {volume}%",
+    "format-muted": "󰝟 muted",
+    "on-click": "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle",
+    "format-icons": {
+      "default": ["󰕿", "󰖀", "󰕾"],
+      "headphones": "󰋋",
+      "headset": "󰋎"
+    }
+  },
+
+  "backlight": {
+    "format": " {icon} {percent}% ",
+    "format-icons": ["󰃞", "󰃟", "󰃠"]
+  },
+
+  // Click the battery icon to toggle the blue light filter. Free real estate:
+  // it is the one module nobody wants to click for its own sake (the battery
+  // popup that used to live here is gone), and the eye notices the screen warm
+  // up immediately, so no notification is needed. See
+  // scripts/toggle-hyprsunset -- hyprshade's shader does the same job but
+  // flickers on this machine.
+  "battery": {
+    "states": { "warning": 30, "critical": 15 },
+    "on-click": "bash ~/.config/waybar/scripts/toggle-hyprsunset",
+    "format": "{icon} {capacity}% ",
+    "format-charging": "󰂄 {capacity}% ",
+    "format-plugged": "󱟦 {capacity}% ",
+    "format-full": "󰁹 {capacity}% ",
+    "format-icons": [
+      "󰂎", "󰁺", "󰁻", "󰁼", "󰁽",
+      "󰁾", "󰁿", "󰂀", "󰂁", "󰂂", "󰁹"
+    ]
+  },
+
+  "clock": {
+    "format": "{:%m-%d-%Y %I:%M %p}"
+  }
+}
