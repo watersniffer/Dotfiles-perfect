@@ -634,8 +634,8 @@ EOF
 render_dock() {
 	emit_css_block "$HOME/.config/nwg-dock-hyprland/style.css" "theme-switcher:nwg-dock" <<EOF
 window {
-	background: $(rgba bg1 island);
-	border-color: $(hex2rgba "$(c bg3)" 0.7);
+	background: $(hex2rgba "$(c bg1)" 0.55);
+	border-color: $(hex2rgba "$(c bg3)" 0.35);
 }
 #active {
 	border-color: $(c accent);

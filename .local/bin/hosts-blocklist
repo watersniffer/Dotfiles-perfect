@@ -255,9 +255,17 @@ block_is_present() { [[ -f "$HOSTS" ]] && grep -qF "$BEGIN" "$HOSTS"; }
 # both call the latter so the note never survives a round trip and accumulates.
 NOTE_A="hosts-blocklist is DISABLED"
 NOTE_B="parked in $STASH"
+NOTE_C="Nothing is blocked while this is off"
 
+# Strip every line of the note `disable` wrote, including the trailing prose line and
+# the blank lines around it. Matching only the first two lines left
+# "Nothing is blocked while this is off" behind after `enable`, which is both untidy
+# and a false statement sitting in the hosts header.
 drop_note() {
-    grep -vF "$NOTE_A" "$1" | grep -vF "$NOTE_B" || true
+    grep -vF "$NOTE_A" "$1" \
+        | grep -vF "$NOTE_B" \
+        | grep -vF "$NOTE_C" \
+        | cat -s || true
 }
 
 status() {

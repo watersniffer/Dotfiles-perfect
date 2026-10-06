@@ -341,16 +341,17 @@ hl.bind(mainMod .. " + SHIFT + N", hl.dsp.exec_cmd(home .. "/.local/bin/animated
 hl.bind(mainMod .. " + SHIFT + W", hl.dsp.exec_cmd(home .. "/.local/bin/toggle-waybar"))
 hl.bind(mainMod .. " + comma", hl.dsp.exec_cmd("smile"))
 
--- Super+P shows/hides Planify's special workspace. The window is hidden, not
--- closed, so it keeps running and reappears instantly.
+-- Super+R shows/hides Planify's special workspace. The window is hidden, not
+-- closed, so it keeps running and reappears instantly. This was Super+P until it
+-- was moved here to free P up.
 --
 -- The argument is a POSITIONAL string, not a table: toggle_special("planify").
 -- The table form { name = "planify" } is accepted silently and does nothing at
 -- all, which is what made this look broken. Hyprland's own default config
 -- (/usr/share/hypr/hyprland.lua) uses the positional form for the same reason.
-hl.bind(mainMod .. " + P", hl.dsp.workspace.toggle_special("planify"))
+hl.bind(mainMod .. " + R", hl.dsp.workspace.toggle_special("planify"))
 
--- Super+D shows/hides Dank Calendar's special workspace, the same way Super+P
+-- Super+D shows/hides Dank Calendar's special workspace, the same way Super+R
 -- does for Planify. Positional string argument, not a table -- see the note on
 -- the Planify bind above.
 hl.bind(mainMod .. " + D", hl.dsp.workspace.toggle_special("dank"))
@@ -430,7 +431,9 @@ hl.bind("XF86AudioStop", hl.dsp.exec_cmd("playerctl stop"), { locked = true })
 hl.bind("XF86MonBrightnessUp", hl.dsp.exec_cmd("brightness-step up"), { repeating = true })
 hl.bind("XF86MonBrightnessDown", hl.dsp.exec_cmd("brightness-step down"), { repeating = true })
 
--- power-mode is here rather than on Super+P, which opens Planify.
+-- power-mode sits on Super+Shift+P. It used to hold Super+P, back when that was
+-- Planify's key; Planify has since moved to Super+R, so plain Super+P is free
+-- again and this could go back to it if you prefer.
 hl.bind(mainMod .. " + SHIFT + P", hl.dsp.exec_cmd(home .. "/.local/bin/power-mode"))
 
 ------------------------
