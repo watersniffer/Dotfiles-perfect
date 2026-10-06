@@ -67,6 +67,27 @@ window#waybar > box {
     margin: 0px;
 }
 
+/* The notification bell.
+ *
+ * Selector is `#custom-swaync`, NOT `#custom-swaync label`. A custom module puts its text
+ * directly in the module widget, so there is no child label to address -- adding `label`
+ * matches nothing and the rule is silently ignored. Compare `#custom-media` above, which
+ * is styled the same way. (Workspaces are the opposite case: those are buttons that DO
+ * contain a label, which is why `#workspaces button label` is correct there.)
+ *
+ * The `*` rule gives every module font-size: 10px. That is too small for a Nerd Font
+ * glyph -- U+F0F3 (verified as fa-bell by nf-glyph) at 10px with font-weight 800 renders
+ * clipped top and bottom inside the 34px bar.
+ *
+ * This must stay a separate rule. It cannot be spliced into the module-group selector
+ * list above: an id cannot share a rule body with those classes, and GTK rejects the
+ * entire stylesheet rather than skipping the one bad rule. */
+#custom-swaync {
+    font-size: 14px;
+    /* U+F0F3 is a tall glyph; give it room so the line box cannot clip it. */
+    padding: 0px 4px;
+}
+
 /* WORKSPACES
  *
  * Diamonds, not numbers. The module is hyprland/workspaces, so its id is "workspaces"

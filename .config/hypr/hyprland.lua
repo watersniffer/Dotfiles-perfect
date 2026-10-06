@@ -341,9 +341,19 @@ hl.bind(mainMod .. " + SHIFT + N", hl.dsp.exec_cmd(home .. "/.local/bin/animated
 hl.bind(mainMod .. " + SHIFT + W", hl.dsp.exec_cmd(home .. "/.local/bin/toggle-waybar"))
 hl.bind(mainMod .. " + comma", hl.dsp.exec_cmd("smile"))
 
--- Super+P toggles Planify. The toggle lives in a script because a keybind cannot branch
--- on whether the window exists.
-hl.bind(mainMod .. " + P", hl.dsp.exec_cmd("planify-toggle"))
+-- Super+P shows/hides Planify's special workspace. The window is hidden, not
+-- closed, so it keeps running and reappears instantly.
+--
+-- The argument is a POSITIONAL string, not a table: toggle_special("planify").
+-- The table form { name = "planify" } is accepted silently and does nothing at
+-- all, which is what made this look broken. Hyprland's own default config
+-- (/usr/share/hypr/hyprland.lua) uses the positional form for the same reason.
+hl.bind(mainMod .. " + P", hl.dsp.workspace.toggle_special("planify"))
+
+-- Super+D shows/hides Dank Calendar's special workspace, the same way Super+P
+-- does for Planify. Positional string argument, not a table -- see the note on
+-- the Planify bind above.
+hl.bind(mainMod .. " + D", hl.dsp.workspace.toggle_special("dank"))
 
 -- Theme switcher: Super+T opens the picker. The bind only launches the script;
 -- theme-switcher ends with `hyprctl reload` itself, which re-executes this file and picks
@@ -492,6 +502,22 @@ hl.window_rule({
 	float = true,
 })
 
+-- Planify lives on its own special workspace, so it never occupies a numbered
+-- workspace and is hidden rather than closed when toggled away. Hiding is what
+-- makes the toggle feel instant: the window is still mapped, so showing it again
+-- does not rebuild it.
+--
+-- This is a separate rule from planify-floating below rather than another `move`
+-- in the same one, because a Lua table cannot hold two `move` keys -- the second
+-- would silently replace the first. Rules apply in definition order, so the window
+-- is put on special:planify first and given its geometry there afterwards.
+hl.window_rule({
+	name = "planify-special-workspace",
+	match = { class = "^(io.github.alainm23.planify)$" },
+
+	workspace = "special:planify",
+})
+
 -- Planify opens floating at a fixed size and position. All three matter, not just float:
 -- Planify restores its own geometry from gsettings on launch, so without size/move it
 -- comes back at whatever it last saved. float comes first because size and move are
@@ -503,6 +529,29 @@ hl.window_rule({
 	float = true,
 	size = "812 568",
 	move = "276 44",
+})
+
+-- Dank Calendar gets the same treatment as Planify: its own special workspace,
+-- opened and hidden with Super+D, and the geometry it had on workspace 3
+-- (1143x567 at 97,38) so it looks the same wherever it appears.
+--
+-- Split into two rules for the same reason as Planify above: one Lua table
+-- cannot hold two `move` keys. Order is definition order -- onto the special
+-- workspace first, geometry second.
+hl.window_rule({
+	name = "dankcalendar-special-workspace",
+	match = { class = "^com[.]danklinux[.]dankcalendar$" },
+
+	workspace = "special:dank",
+})
+
+hl.window_rule({
+	name = "dankcalendar-floating",
+	match = { class = "^com[.]danklinux[.]dankcalendar$" },
+
+	float = true,
+	size = "1143 567",
+	move = "97 38",
 })
 
 hl.window_rule({
